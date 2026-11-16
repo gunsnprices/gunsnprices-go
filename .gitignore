@@ -1,0 +1,5 @@
+/gunsnprices
+/gunsnprices.exe
+*.test
+*.out
+/dist/

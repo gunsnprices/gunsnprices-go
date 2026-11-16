@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        go: ["1.26.x", "1.27.x"]
+        include:
+          - os: macos-latest
+            go: "1.27.x"
+          - os: windows-latest
+            go: "1.27.x"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.go }}
+      - run: go vet ./...
+      - run: go test -race ./...
+        if: runner.os != 'Windows'
+      - run: go test ./...
+        if: runner.os == 'Windows'
+      - run: go run ./cmd/gunsnprices -price 18.99 "Federal 9mm 115gr FMJ 50/Box"
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go run honnef.co/go/tools/cmd/staticcheck@2026.2.2 ./...
+      - run: go mod tidy -diff
+
+  crosscheck:
+    # every public function against the Python package (the reference) on the golden titles and Unicode edits of them
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: pip install gunsnprices==0.1.2
+      - run: python tools/make_corpus.py "$RUNNER_TEMP/corpus.jsonl"
+      - run: go test -run Crosscheck -v .
+        env:
+          GUNSNPRICES_CORPUS: ${{ runner.temp }}/corpus.jsonl
+
+  tables:
+    # internal/pyre/tables.go and the engine test cases are generated from Python 3.13 (Unicode 15.1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      # line 1 names the exact Python version
+      - run: diff <(python3 tools/gen_tables.py | tail -n +2) <(tail -n +2 internal/pyre/tables.go)
+        shell: bash
+      - run: diff <(python3 tools/gen_pyre_cases.py) <(gunzip -c internal/pyre/testdata/cases.jsonl.gz)
+        shell: bash
